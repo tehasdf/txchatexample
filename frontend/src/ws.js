@@ -1,8 +1,10 @@
+
 export default class WSConnection {
-    constructor(url){
+    constructor(url, callbacks){
         this._url = url;
         this._conn = null;
-
+        this._messageCallback = callbacks.onmessage;
+        this._closeCallback = callbacks.onclose;
 
     }
 
@@ -22,8 +24,9 @@ export default class WSConnection {
         this._connected(this);
     }
 
-    onmessage(){
-
+    onmessage(evt){
+        let data = JSON.parse(evt.data);
+        this._messageCallback(data);
     }
 
     onclose(){
