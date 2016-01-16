@@ -5,6 +5,8 @@ import {Provider} from 'react-redux';
 import {Router, Route, IndexRoute} from 'react-router';
 import {createHistory} from 'history';
 import {syncHistory, routeReducer} from 'redux-simple-router';
+import thunkMiddleware from 'redux-thunk';
+import createLogger from 'redux-logger';
 
 import App from './components/App';
 import Settings from './components/Settings';
@@ -17,9 +19,22 @@ const reducer = combineReducers(Object.assign({}, rootReducer, {
   routing: routeReducer
 }));
 
+const configureStore = initialState => {
+    return applyMiddleware(
+        thunkMiddleware,
+        logger
+    )(createStore)(rootReducer, initialState);
+}
+
 const history = createHistory();
 const reduxRouterMiddleware = syncHistory(history);
-const createStoreWithMiddleware = applyMiddleware(reduxRouterMiddleware)(createStore);
+const logger = createLogger();
+
+const createStoreWithMiddleware = applyMiddleware(
+    reduxRouterMiddleware,
+    thunkMiddleware,
+    logger
+)(createStore);
 
 const store = createStoreWithMiddleware(reducer);
 

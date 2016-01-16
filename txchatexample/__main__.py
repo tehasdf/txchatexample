@@ -8,8 +8,29 @@ from twisted.web.static import File
 from twisted.web.proxy import ReverseProxyResource
 from twisted.web.resource import Resource
 
+from autobahn.twisted.resource import WebSocketResource
+from autobahn.twisted.websocket import WebSocketServerFactory, WebSocketServerProtocol
 
 
+class APIResource(Resource):
+    def getChild(self, path, request):
+        if path == 'ws':
+            return WSResoure()
+        else:
+            raise NotImplementedError()
+
+
+factory = WebSocketServerFactory()
+
+
+class EchoServerProtocol(WebSocketServerProtocol):
+
+    def onMessage(self, payload, isBinary):
+        self.sendMessage(payload, isBinary)
+
+
+
+factory.protocol = EchoServerProtocol
 class MainResource(Resource):
     def __init__(self, static_path=None):
         if static_path is None:
@@ -18,8 +39,10 @@ class MainResource(Resource):
         Resource.__init__(self)
 
     def getChild(self, path, request):
-        if path.startswith('api'):
-            raise NotImplementedError()
+        if path == 'api':
+            return APIResource()
+        elif path == 'ws':
+            return WebSocketResource(factory)
         else:
             return ReverseProxyResource('127.0.0.1', 8080, os.path.join('/', path))
         if not path:
