@@ -3,12 +3,18 @@ import os.path
 import sys
 import uuid
 
+from zope.interface import Interface, implementer
+
 from twisted.internet import reactor
 from twisted.logger import Logger, textFileLogObserver, globalLogPublisher
 from twisted.web.server import Site
 from twisted.web.static import File
 from twisted.web.proxy import ReverseProxyResource
 from twisted.web.resource import Resource
+from twisted.cred.portal import Portal
+from twisted.internet.defer import inlineCallbacks
+from twisted.web.util import DeferredResource
+
 
 from autobahn.twisted.resource import WebSocketResource
 from autobahn.twisted.websocket import WebSocketServerFactory, WebSocketServerProtocol
@@ -20,7 +26,7 @@ from sqlalchemy.dialects.postgresql import dialect
 from sqlalchemy import select
 
 from psycopg2.extras import NamedTupleCursor
-
+from psycopg2 import IntegrityError
 
 
 md = MetaData()
@@ -47,16 +53,43 @@ class APIResource(Resource):
 
 
 class EchoServerProtocol(WebSocketServerProtocol):
+    log = Logger()
+
     def __init__(self, chatroom, talker):
         self._chatroom = chatroom
         self._talker = talker
         super(EchoServerProtocol, self).__init__()
 
     def onOpen(self):
-        self.sendMessage(json.dumps({'a': 'b'}))
+        self.sendMessage(json.dumps({
+            'action': 'userDetails',
+            'payload': self._talker.getUserDetails()
+        }))
 
     def onMessage(self, payload, isBinary):
-        self.sendMessage(payload, isBinary)
+        self.log.debug('message: {payload!r}', payload=payload)
+        message = json.loads(payload)
+        action = message.get('action')
+        if action:
+            handler = getattr(self, 'handle_%s' % (action, ), None)
+            if handler:
+                handler(**message.get('payload', {}))
+
+    @inlineCallbacks
+    def handle_setName(self, name):
+        self.log.debug('Setting name to {name}', name=name)
+
+        try:
+            yield self._talker.setName(name)
+        except ValueError:
+            response = {
+                'action': 'setNameFailed'
+            }
+        else:
+            response = {
+                'action': 'setNameSuccess'
+            }
+        self.sendMessage(json.dumps(response))
 
 
 class WSChatFactory(WebSocketServerFactory):
@@ -71,26 +104,53 @@ class WSChatFactory(WebSocketServerFactory):
         proto.factory = self
         return proto
 
-from twisted.cred.portal import Portal
-
-from zope.interface import Interface, implementer
-from twisted.web.util import DeferredResource
-
 class ITalker(Interface):
     """
     """
 
 @implementer(ITalker)
 class Talker(object):
-    def __init__(self, user):
+    def __init__(self, pool, user):
+        self._pool = pool
+        self._user = user
+
+    def setName(self, name):
+        query = (users
+            .update()
+            .where(users.c.user_id == self._user.user_id)
+            .values(name=name)
+            .compile(dialect=dialect())
+        )
+        return (self._pool.runOperation(str(query), query.params)
+            .addErrback(self._onNameTaken, name)
+            .addCallback(lambda _: self._refreshUser())
+        )
+
+    def _onNameTaken(self, failure, name):
+        failure.trap(IntegrityError)
+        raise ValueError('Name %s is already, taken' % (name, ))
+
+    @inlineCallbacks
+    def _refreshUser(self):
+        query = (select([users])
+            .where(users.c.user_id == self._user.user_id)
+            .compile(dialect=dialect())
+        )
+        user = (yield self._pool.runQuery(str(query), query.params))[0]
         self._user = user
 
     def logout(self):
         pass
 
+    def getUserDetails(self):
+        return self._user._asdict()
+
 
 class ChatRealm(object):
     log = Logger()
+
+    def __init__(self, pool):
+        self._pool = pool
 
     def requestAvatar(self, avatarId, mind, *ifaces):
         self.log.debug('requestAvatar {avatarId}', avatarId=avatarId)
@@ -105,7 +165,16 @@ class ChatRealm(object):
 
     def _makeTalker(self, avatarId):
         return (self._getUser(avatarId)
-            .addCallback(Talker)
+            .addCallback(lambda user: Talker(self._pool, user))
+        )
+
+    def _getUser(self, user_id):
+        query = (select([users])
+            .where(users.c.user_id == user_id)
+            .compile(dialect=dialect())
+        )
+        return (self._pool.runQuery(str(query), query.params)
+            .addCallback(lambda users: users[0])
         )
 
 
@@ -249,11 +318,11 @@ if __name__ == '__main__':
     pool = txpostgres.ConnectionPool(None, dbname='asdf', cursor_factory=NamedTupleCursor)
     pool.start()
     chatroom = Chatroom(pool)
-    realm = ChatRealm()
+    realm = ChatRealm(pool)
     portal = Portal(realm)
     checker = TokenChecker(pool)
     portal.registerChecker(checker)
-    ws = WSResourceWrapper(portal)
+    ws = WSResourceWrapper(chatroom, portal)
     site = Site(MainResource(ws))
     reactor.listenTCP(8000, site)
 

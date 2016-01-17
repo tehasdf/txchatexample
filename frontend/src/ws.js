@@ -33,4 +33,7 @@ export default class WSConnection {
 
     }
 
+    send(data){
+        this._conn.send(JSON.stringify(data));
+    }
 }

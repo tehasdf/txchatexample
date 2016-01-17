@@ -17,10 +17,10 @@ import Home from './components/Home';
 import rootReducer from './reducers';
 
 
-const reducer = reduceReducers(
-    combineReducers({routing: routeReducer}),
-    rootReducer
-);
+const reducer = combineReducers({
+    chat: rootReducer,
+    routing: routeReducer
+});
 
 const history = createHistory();
 const reduxRouterMiddleware = syncHistory(history);
