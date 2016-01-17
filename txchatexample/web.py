@@ -11,6 +11,7 @@ from autobahn.twisted.resource import WebSocketResource
 from txchatexample.auth import makePortal, Token
 from txchatexample.chat import Chatroom, ITalker
 from txchatexample.protocol import WSChatFactory
+from txchatexample.util import DBListener
 
 
 class APIResource(Resource):
@@ -73,8 +74,9 @@ class WSResourceWrapper(object):
         return DeferredResource(d)
 
 
-def makeEntryPoint(pool):
-    chatroom = Chatroom(pool)
+def makeEntryPoint(pool, conn):
+    db_listener = DBListener(conn)
+    chatroom = Chatroom(pool, db_listener)
     chatroom.start()
 
     portal = makePortal(pool)

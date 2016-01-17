@@ -11,7 +11,7 @@ from sqlalchemy import select
 from psycopg2 import IntegrityError
 
 from txchatexample.db import logs, users
-
+from txchatexample.util import Registry
 
 class ITalker(Interface):
     """
@@ -64,49 +64,32 @@ class Talker(object):
 LOG_SELECT_QUERY = (select([logs, users.c.name])
     .select_from(logs.join(users))
 )
-class Chatroom(object):
+class Chatroom(Registry):
     log = Logger()
 
-    def __init__(self, pool):
-        self._listeners = set()
+    def __init__(self, pool, listener):
+        super(Chatroom, self).__init__()
+        self._dbListener = listener
         self._pool = pool
 
-        self._listenConnection = txpostgres.Connection(self._pool.reactor)
-        self._lastId = None
-
     def start(self):
-        pool = self._pool
+        self.log.info('Starting')
+        self._dbListener.register(self._onNewLineNotify)
+        return self._dbListener.start()
 
-        return (self._listenConnection.connect(*pool.connargs, **pool.connkw)
-            .addCallback(self._listenConnectionConnected)
-        )
-
-    def _listenConnectionConnected(self, conn):
-        self._listenConnection.addNotifyObserver(self._onNewLineNotify)
-        return self._listenConnection.runOperation('listen chat_line_notification')
-
-    def _onNewLineNotify(self, notify):
-        log_id = notify.payload
+    def _onNewLineNotify(self, log_id):
         self.log.debug('notify payload {payload}', payload=log_id)
         query = (LOG_SELECT_QUERY
             .where(logs.c.log_id == log_id)
         )
 
         return (self._pool.runQuery(query)
-            .addCallback(self._broadcast)
+            .addCallback(lambda logs: [log._asdict() for log in logs])
+            .addCallback(lambda logs: self.broadcast(self._sendLogs, logs))
         )
 
-    def _broadcast(self, newLogs):
-        newLogs = [log._asdict() for log in newLogs]
-
-        for proto in self._listeners:
-            proto.sendAction(newLogs, action='chatLines')
-
-    def register(self, listener):
-        self._listeners.add(listener)
-
-    def unregister(self, listener):
-        self._listeners.remove(listener)
+    def _sendLogs(self, proto, logs):
+        proto.sendAction(logs, action='chatLines')
 
     def changeName(self, from_name, to_name):
         if to_name in self._names:
@@ -129,6 +112,5 @@ class Chatroom(object):
             .insert()
             .values(user_id=user_id, text=line)
             .returning(logs.c.log_id)
-            .compile(dialect=dialect())
         )
         return self._pool.runOperation(query)

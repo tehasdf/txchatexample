@@ -41,3 +41,32 @@ class ConnectionPool(txpostgres.ConnectionPool):
     def runOperation(self, query, params=None):
         query, params = self._getQueryWithParams(query, params)
         return super(ConnectionPool, self).runOperation(query, params)
+
+
+class Registry(object):
+    def __init__(self):
+        self._registered = set()
+
+    def register(self, other):
+        self._registered.add(other)
+
+    def unregister(self, other):
+        self._registered.add(other)
+
+    def broadcast(self, func, *args, **kwargs):
+        return [func(elem, *args, **kwargs) for elem in self._registered]
+
+
+
+class DBListener(Registry):
+    def __init__(self, connection, channel='chat_line_notification'):
+        super(DBListener, self).__init__()
+        self._connection = connection
+        self._channel = channel
+
+    def start(self):
+        self._connection.addNotifyObserver(self._onNotify)
+        return self._connection.runOperation('listen %s' % (self._channel, ))
+
+    def _onNotify(self, notify):
+        self.broadcast(lambda registered: registered(notify.payload))
