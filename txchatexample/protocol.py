@@ -1,44 +1,14 @@
-from datetime import datetime
 import json
-import os.path
-import sys
-import uuid
 
-from zope.interface import Interface, implementer
-
-from twisted.cred.credentials import Anonymous, IAnonymous
-from twisted.cred.checkers import ICredentialsChecker
-from twisted.internet import reactor
-from twisted.logger import Logger, textFileLogObserver, globalLogPublisher
-from twisted.web.server import Site
-from twisted.web.static import File
-from twisted.web.proxy import ReverseProxyResource
-from twisted.web.resource import Resource
-from twisted.cred.portal import Portal
-from twisted.internet.defer import inlineCallbacks, gatherResults, returnValue
+from twisted.cred.credentials import Anonymous
+from twisted.logger import Logger
+from twisted.internet.defer import inlineCallbacks
 from twisted.web.util import DeferredResource
 
-from autobahn.twisted.resource import WebSocketResource
 from autobahn.twisted.websocket import WebSocketServerFactory, WebSocketServerProtocol
 
-from txpostgres import txpostgres
-
-from sqlalchemy import Table, Column, Integer, String, MetaData, ForeignKey, Sequence
-from sqlalchemy.dialects.postgresql import dialect, TIMESTAMP
-from sqlalchemy import select
-
-from psycopg2.extras import NamedTupleCursor
-from psycopg2 import IntegrityError
-
-
-
-
-from sqlalchemy import bindparam
-from sqlalchemy import insert
-
-from txchatexample.auth import Token
-from txchatexample.chat import ITalker
 from txchatexample.util import dumps
+
 
 class ChatProtocol(WebSocketServerProtocol):
     log = Logger()
@@ -109,24 +79,4 @@ class WSChatFactory(WebSocketServerFactory):
         proto = self.protocol(self._chatroom, self._talker)
         proto.factory = self
         return proto
-
-
-class WSResourceWrapper(object):
-    def __init__(self, chatroom, portal):
-        self._chatroom = chatroom
-        self._portal = portal
-
-    def getResource(self, request):
-        token = request.getCookie('token')
-
-        if token is None:
-            credentials = Anonymous()
-        else:
-            credentials = Token(token)
-
-        d = (self._portal.login(credentials, None, ITalker)
-            .addCallback(lambda (iface, talker, logout): WSChatFactory(self._chatroom, talker))
-            .addCallback(WebSocketResource)
-        )
-        return DeferredResource(d)
 
