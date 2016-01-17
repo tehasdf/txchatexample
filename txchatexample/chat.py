@@ -29,9 +29,8 @@ class Talker(object):
             .update()
             .where(users.c.user_id == self._user.user_id)
             .values(name=name)
-            .compile(dialect=dialect())
         )
-        return (self._pool.runOperation(str(query), query.params)
+        return (self._pool.runOperation(query)
             .addErrback(self._onNameTaken, name)
             .addCallback(lambda _: self._refreshUser())
         )
@@ -44,9 +43,8 @@ class Talker(object):
     def _refreshUser(self):
         query = (select([users])
             .where(users.c.user_id == self._user.user_id)
-            .compile(dialect=dialect())
         )
-        user = (yield self._pool.runQuery(str(query), query.params))[0]
+        user = (yield self._pool.runQuery(query))[0]
         self._user = user
         returnValue(self._user)
 
@@ -92,10 +90,9 @@ class Chatroom(object):
         self.log.debug('notify payload {payload}', payload=log_id)
         query = (LOG_SELECT_QUERY
             .where(logs.c.log_id == log_id)
-            .compile(dialect=dialect())
         )
 
-        return (self._pool.runQuery(str(query), query.params)
+        return (self._pool.runQuery(query)
             .addCallback(self._broadcast)
         )
 
@@ -122,9 +119,8 @@ class Chatroom(object):
         query = (LOG_SELECT_QUERY
             .order_by(logs.c.when.desc())
             .limit(30)
-            .compile(dialect=dialect())
         )
-        return (self._pool.runQuery(str(query), query.params)
+        return (self._pool.runQuery(query)
             .addCallback(lambda lines: [line._asdict() for line in lines])
         )
 
@@ -135,4 +131,4 @@ class Chatroom(object):
             .returning(logs.c.log_id)
             .compile(dialect=dialect())
         )
-        return self._pool.runOperation(str(query), query.params)
+        return self._pool.runOperation(query)

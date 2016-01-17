@@ -46,9 +46,8 @@ class TokenChecker(object):
         self.log.debug('getUserByToken {token}', token=token)
         query = (select([users.c.user_id])
             .where(users.c.token == token)
-            .compile(dialect=dialect())
         )
-        return self._pool.runQuery(str(query), query.params)
+        return self._pool.runQuery(query)
 
     def _createIfNotExists(self, user, token):
         if not user:
@@ -61,10 +60,9 @@ class TokenChecker(object):
             .insert()
             .values(token=token, name=token)
             .returning(users.c.user_id)
-            .compile(dialect=dialect())
         )
-        self.log.debug('createUser {query.params}', query=query)
-        return self._pool.runQuery(str(query), query.params)
+        self.log.debug('createUser {token}', token=token)
+        return self._pool.runQuery(query)
 
 class ChatRealm(object):
     log = Logger()
@@ -91,9 +89,8 @@ class ChatRealm(object):
     def _getUser(self, user_id):
         query = (select([users])
             .where(users.c.user_id == user_id)
-            .compile(dialect=dialect())
         )
-        return (self._pool.runQuery(str(query), query.params)
+        return (self._pool.runQuery(query)
             .addCallback(lambda users: users[0])
         )
 
