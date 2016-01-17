@@ -47,12 +47,12 @@ class APIResource(Resource):
 
 
 class EchoServerProtocol(WebSocketServerProtocol):
-    def __init__(self, talker):
+    def __init__(self, chatroom, talker):
+        self._chatroom = chatroom
         self._talker = talker
         super(EchoServerProtocol, self).__init__()
 
     def onOpen(self):
-
         self.sendMessage(json.dumps({'a': 'b'}))
 
     def onMessage(self, payload, isBinary):
@@ -61,12 +61,13 @@ class EchoServerProtocol(WebSocketServerProtocol):
 
 class WSChatFactory(WebSocketServerFactory):
     protocol = EchoServerProtocol
-    def __init__(self, talker):
+    def __init__(self, chatroom, talker):
+        self._chatroom = chatroom
         self._talker = talker
         WebSocketServerFactory.__init__(self)
 
     def buildProtocol(self, addr):
-        proto = self.protocol(self._talker)
+        proto = self.protocol(self._chatroom, self._talker)
         proto.factory = self
         return proto
 
@@ -81,29 +82,31 @@ class ITalker(Interface):
 
 @implementer(ITalker)
 class Talker(object):
-    def __init__(self, chatroom, id):
-        self._chatroom = chatroom
-        self._id = id
-        self.name = id
+    def __init__(self, user):
+        self._user = user
 
     def logout(self):
         pass
 
+
 class ChatRealm(object):
     log = Logger()
 
-    def __init__(self, chatroom):
-        self._chatroom = chatroom
-
     def requestAvatar(self, avatarId, mind, *ifaces):
         self.log.debug('requestAvatar {avatarId}', avatarId=avatarId)
+
         for iface in ifaces:
             if iface is ITalker:
-                talker = Talker(chatroom, avatarId)
-                return (ITalker, talker, talker.logout)
+                return (self._makeTalker(avatarId)
+                    .addCallback(lambda talker: (ITalker, talker, talker.logout))
+                )
         else:
             raise ValueError('Can only return ITalker, requested %s' % (ifaces, ))
 
+    def _makeTalker(self, avatarId):
+        return (self._getUser(avatarId)
+            .addCallback(Talker)
+        )
 
 
 class Chatroom(object):
@@ -143,7 +146,8 @@ class Token(object):
 
 
 class WSResourceWrapper(object):
-    def __init__(self, portal):
+    def __init__(self, chatroom, portal):
+        self._chatroom = chatroom
         self._portal = portal
 
     def getResource(self, request):
@@ -155,7 +159,7 @@ class WSResourceWrapper(object):
             credentials = Token(token)
 
         d = (self._portal.login(credentials, None, ITalker)
-            .addCallback(lambda (iface, talker, logout): WSChatFactory(talker))
+            .addCallback(lambda (iface, talker, logout): WSChatFactory(self._chatroom, talker))
             .addCallback(WebSocketResource)
         )
         return DeferredResource(d)
@@ -168,16 +172,9 @@ from sqlalchemy import insert
 class TokenChecker(object):
     credentialInterfaces = [IToken]
     log = Logger()
+
     def __init__(self, pool):
         self._pool = pool
-
-    def getUserByToken(self, token):
-        self.log.debug('getUserByToken {token}', token=token)
-        query = (select([users.c.user_id])
-            .where(users.c.token == token)
-            .compile(dialect=dialect())
-        )
-        return self._pool.runQuery(str(query), query.params)
 
     def requestAvatarId(self, credentials):
         if IToken.providedBy(credentials):
@@ -190,6 +187,14 @@ class TokenChecker(object):
 
         else:
             raise NotImplementedError()
+
+    def getUserByToken(self, token):
+        self.log.debug('getUserByToken {token}', token=token)
+        query = (select([users.c.user_id])
+            .where(users.c.token == token)
+            .compile(dialect=dialect())
+        )
+        return self._pool.runQuery(str(query), query.params)
 
     def _gotUser(self, user, token):
         if not user:
@@ -244,7 +249,7 @@ if __name__ == '__main__':
     pool = txpostgres.ConnectionPool(None, dbname='asdf', cursor_factory=NamedTupleCursor)
     pool.start()
     chatroom = Chatroom(pool)
-    realm = ChatRealm(chatroom)
+    realm = ChatRealm()
     portal = Portal(realm)
     checker = TokenChecker(pool)
     portal.registerChecker(checker)
