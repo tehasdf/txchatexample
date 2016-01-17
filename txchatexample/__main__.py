@@ -1,3 +1,4 @@
+from datetime import datetime
 import json
 import os.path
 import sys
@@ -38,13 +39,25 @@ users = Table('chat_users', md,
 )
 
 
+chat_logs_seq = Sequence('chat_logs_id_seq')
 logs = Table('chat_logs', md,
-    Column('log_id', Integer(), Sequence('chat_logs_id_seq'), primary_key=True),
+    Column('log_id', Integer(), chat_logs_seq,
+        server_default=chat_logs_seq.next_value(), primary_key=True),
     Column('user_id', Integer(), ForeignKey('chat_users')),
-    Column('when', TIMESTAMP()),
+    Column('when', TIMESTAMP(timezone=False)),
     Column('text', String())
 )
 
+
+class JSONEncoderWithDatetime(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        else:
+            return super(JSONEncoderWithDatetime, self).default(obj)
+
+def dumps(obj, encoder=JSONEncoderWithDatetime()):
+    return encoder.encode(obj)
 
 class APIResource(Resource):
     def getChild(self, path, request):
@@ -54,15 +67,17 @@ class APIResource(Resource):
             raise NotImplementedError()
 
 
-class EchoServerProtocol(WebSocketServerProtocol):
+class ChatProtocol(WebSocketServerProtocol):
     log = Logger()
 
     def __init__(self, chatroom, talker):
         self._chatroom = chatroom
         self._talker = talker
-        super(EchoServerProtocol, self).__init__()
+        super(ChatProtocol, self).__init__()
 
     def onOpen(self):
+        self._chatroom.register(self)
+
         (self._talker.getUserDetails()
             .addCallback(self.sendAction, action='userDetails')
         )
@@ -72,7 +87,7 @@ class EchoServerProtocol(WebSocketServerProtocol):
         )
 
     def sendAction(self, payload=None, action=None):
-        self.sendMessage(json.dumps({
+        self.sendMessage(dumps({
             'action': action,
             'payload': payload
         }))
@@ -100,11 +115,17 @@ class EchoServerProtocol(WebSocketServerProtocol):
             response = {
                 'action': 'setNameSuccess'
             }
-        self.sendMessage(json.dumps(response))
+        self.sendMessage(dumps(response))
 
+
+    def handle_say(self, line):
+        self._chatroom.say(user_id=self._talker.user_id, line=line)
+
+    def onClose(self, wasClean, code, reason):
+        self._chatroom.unregister(self)
 
 class WSChatFactory(WebSocketServerFactory):
-    protocol = EchoServerProtocol
+    protocol = ChatProtocol
     def __init__(self, chatroom, talker):
         self._chatroom = chatroom
         self._talker = talker
@@ -151,6 +172,10 @@ class Talker(object):
         self._user = user
         returnValue(self._user)
 
+    @property
+    def user_id(self):
+        return self._user.user_id
+
     def logout(self):
         pass
 
@@ -192,10 +217,53 @@ class ChatRealm(object):
         )
 
 
+LOG_SELECT_QUERY = (select([logs, users.c.name])
+    .select_from(logs.join(users))
+)
 class Chatroom(object):
+    log = Logger()
+
     def __init__(self, pool):
-        self._names = set()
+        self._listeners = set()
         self._pool = pool
+
+        self._listenConnection = txpostgres.Connection(self._pool.reactor)
+        self._lastId = None
+
+    def start(self):
+        pool = self._pool
+
+        return (self._listenConnection.connect(*pool.connargs, **pool.connkw)
+            .addCallback(self._listenConnectionConnected)
+        )
+
+    def _listenConnectionConnected(self, conn):
+        self._listenConnection.addNotifyObserver(self._onNewLineNotify)
+        return self._listenConnection.runOperation('listen chat_line_notification')
+
+    def _onNewLineNotify(self, notify):
+        log_id = notify.payload
+        self.log.debug('notify payload {payload}', payload=log_id)
+        query = (LOG_SELECT_QUERY
+            .where(logs.c.log_id == log_id)
+            .compile(dialect=dialect())
+        )
+
+        return (self._pool.runQuery(str(query), query.params)
+            .addCallback(self._broadcast)
+        )
+
+    def _broadcast(self, newLogs):
+        newLogs = [log._asdict() for log in newLogs]
+
+        for proto in self._listeners:
+            proto.sendAction(newLogs, action='chatLines')
+
+    def register(self, listener):
+        self._listeners.add(listener)
+
+    def unregister(self, listener):
+        self._listeners.remove(listener)
 
     def changeName(self, from_name, to_name):
         if to_name in self._names:
@@ -205,7 +273,7 @@ class Chatroom(object):
         self._names.remove(to_name)
 
     def getLastLog(self):
-        query = (select([logs])
+        query = (LOG_SELECT_QUERY
             .order_by(logs.c.when.desc())
             .limit(30)
             .compile(dialect=dialect())
@@ -213,6 +281,16 @@ class Chatroom(object):
         return (self._pool.runQuery(str(query), query.params)
             .addCallback(lambda lines: [line._asdict() for line in lines])
         )
+
+    def say(self, user_id, line):
+        query = (logs
+            .insert()
+            .values(user_id=user_id, text=line)
+            .returning(logs.c.log_id)
+            .compile(dialect=dialect())
+        )
+        return self._pool.runOperation(str(query), query.params)
+
 
 class IToken(Interface):
     pass
@@ -260,7 +338,8 @@ class TokenChecker(object):
             token = credentials.value
 
             return (self.getUserByToken(token)
-                .addCallback(self._gotUser, token)
+                .addCallback(self._createIfNotExists, token)
+                .addCallback(lambda users: users[0])
                 .addCallback(lambda user: user.user_id)
             )
 
@@ -275,11 +354,11 @@ class TokenChecker(object):
         )
         return self._pool.runQuery(str(query), query.params)
 
-    def _gotUser(self, user, token):
+    def _createIfNotExists(self, user, token):
         if not user:
             return self.createUser(token)
         else:
-            return user[0]
+            return user
 
     def createUser(self, token):
         query = (users
@@ -288,7 +367,7 @@ class TokenChecker(object):
             .returning(users.c.user_id)
             .compile(dialect=dialect())
         )
-        self.log.debug('createUser {token}', token=token)
+        self.log.debug('createUser {query.params}', query=query)
         return self._pool.runQuery(str(query), query.params)
 
 
@@ -328,6 +407,7 @@ if __name__ == '__main__':
     pool = txpostgres.ConnectionPool(None, dbname='asdf', cursor_factory=NamedTupleCursor)
     pool.start()
     chatroom = Chatroom(pool)
+    chatroom.start()
     realm = ChatRealm(pool)
     portal = Portal(realm)
     checker = TokenChecker(pool)

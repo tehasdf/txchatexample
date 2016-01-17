@@ -1,6 +1,12 @@
 import {handleActions} from 'redux-actions';
 import {routeReducer} from 'redux-simple-router';
 
+const _mergeLines = (oldLines, newLines) => {
+    return [].concat(oldLines, newLines).sort((a, b) => {
+        return (new Date(a.when)) > (new Date(b.when)) ? -1 : 1;
+    }).slice(0, 30).reverse();
+}
+
 const rootReducer = handleActions({
     CONNECTED: (state, action) => ({
         ...state,
@@ -24,6 +30,11 @@ const rootReducer = handleActions({
         name: state.name
     }),
 
+    CHAT_LINES_RECEIVED: (state, action) => ({
+        ...state,
+        lines: _mergeLines(state.lines, action.payload)
+    }),
+
     USER_DETAILS_RECEIVED: (state, action) => ({
         ...state,
         name: action.payload.name
@@ -33,6 +44,7 @@ const rootReducer = handleActions({
     connected: false,
     name: null,
     _originalName: null, // backup to revert to, if name change fails
+    lines: []
 });
 
 export default rootReducer;

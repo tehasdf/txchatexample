@@ -71,3 +71,16 @@ export const setName = newName => (dispatch, getState) => {
         }
     })
 }
+
+export const sendLine = line => (dispatch, getState) => {
+    console.info('sendLine', line)
+
+    let wsConnection = getState().chat.wsConnection;
+
+    wsConnection.send({
+        action: 'say',
+        payload: {
+            line: line
+        }
+    })
+}
