@@ -7,6 +7,8 @@ import {createHistory} from 'history';
 import {syncHistory, routeReducer} from 'redux-simple-router';
 import thunkMiddleware from 'redux-thunk';
 import createLogger from 'redux-logger';
+import reduceReducers from 'reduce-reducers';
+
 
 import App from './components/App';
 import Settings from './components/Settings';
@@ -15,16 +17,10 @@ import Home from './components/Home';
 import rootReducer from './reducers';
 
 
-const reducer = combineReducers(Object.assign({}, rootReducer, {
-  routing: routeReducer
-}));
-
-const configureStore = initialState => {
-    return applyMiddleware(
-        thunkMiddleware,
-        logger
-    )(createStore)(rootReducer, initialState);
-}
+const reducer = reduceReducers(
+    combineReducers({routing: routeReducer}),
+    rootReducer
+);
 
 const history = createHistory();
 const reduxRouterMiddleware = syncHistory(history);
