@@ -15,9 +15,9 @@ const mapDispatchToProps = {
 
 const Chat = ({lines, sendLine}) => (
     <div>
-        <ul>
+        <ul className="lines">
             {lines.map(line => (
-                <li key={line.log_id}>{JSON.stringify(line)}</li>
+                <li key={line.log_id}><span className="nick">&lt;{line.name}&gt;</span> <span>{line.text}</span></li>
             ))}
         </ul>
         <form onSubmit={evt => {
