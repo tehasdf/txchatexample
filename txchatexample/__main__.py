@@ -197,14 +197,6 @@ class Chatroom(object):
         self._names = set()
         self._pool = pool
 
-    def createRandomName(self):
-        number = 0
-        while True:
-            nick = 'guest%d' % (number, )
-            if nick not in self._names:
-                self._names.add(nick)
-                return nick
-
     def changeName(self, from_name, to_name):
         if to_name in self._names:
             raise ValueError('Name %s is already taken' % (to_name, ))
