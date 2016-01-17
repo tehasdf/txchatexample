@@ -4,7 +4,7 @@ import sys
 import uuid
 
 from twisted.internet import reactor
-from twisted.python import log
+from twisted.logger import Logger, textFileLogObserver, globalLogPublisher
 from twisted.web.server import Site
 from twisted.web.static import File
 from twisted.web.proxy import ReverseProxyResource
@@ -15,28 +15,27 @@ from autobahn.twisted.websocket import WebSocketServerFactory, WebSocketServerPr
 
 from txpostgres import txpostgres
 
-from sqlalchemy import Table, Column, Integer, String, MetaData, ForeignKey
+from sqlalchemy import Table, Column, Integer, String, MetaData, ForeignKey, Sequence
+from sqlalchemy.dialects.postgresql import dialect
+from sqlalchemy import select
+
+from psycopg2.extras import NamedTupleCursor
+
+
 
 md = MetaData()
 users = Table('chat_users', md,
-    Column('user_id', Integer(), primary_key=True),
+    Column('user_id', Integer(), Sequence('chat_users_id_seq'), primary_key=True),
     Column('token', String(32), unique=True),
     Column('name', String(200), unique=True)
 )
 
 
 logs = Table('chat_logs', md,
-    Column('log_id', Integer(), primary_key=True),
+    Column('log_id', Integer(), Sequence('chat_logs_id_seq'), primary_key=True),
     Column('user_id', Integer(), ForeignKey('chat_users')),
     Column('text', String())
 )
-from sqlalchemy.dialects.postgresql import dialect
-
-
-from sqlalchemy import select
-
-
-
 
 
 class APIResource(Resource):
@@ -91,10 +90,13 @@ class Talker(object):
         pass
 
 class ChatRealm(object):
+    log = Logger()
+
     def __init__(self, chatroom):
         self._chatroom = chatroom
 
     def requestAvatar(self, avatarId, mind, *ifaces):
+        self.log.debug('requestAvatar {avatarId}', avatarId=avatarId)
         for iface in ifaces:
             if iface is ITalker:
                 talker = Talker(chatroom, avatarId)
@@ -146,10 +148,12 @@ class WSResourceWrapper(object):
 
     def getResource(self, request):
         token = request.getCookie('token')
+
         if token is None:
             credentials = Anonymous()
         else:
             credentials = Token(token)
+
         d = (self._portal.login(credentials, None, ITalker)
             .addCallback(lambda (iface, talker, logout): WSChatFactory(talker))
             .addCallback(WebSocketResource)
@@ -157,19 +161,51 @@ class WSResourceWrapper(object):
         return DeferredResource(d)
 
 
+from sqlalchemy import bindparam
+from sqlalchemy import insert
+
 @implementer(ICredentialsChecker)
 class TokenChecker(object):
-    credentialInterfaces = [IAnonymous, IToken]
+    credentialInterfaces = [IToken]
+    log = Logger()
     def __init__(self, pool):
         self._pool = pool
 
+    def getUserByToken(self, token):
+        self.log.debug('getUserByToken {token}', token=token)
+        query = (select([users.c.user_id])
+            .where(users.c.token == token)
+            .compile(dialect=dialect())
+        )
+        return self._pool.runQuery(str(query), query.params)
+
     def requestAvatarId(self, credentials):
-        if IAnonymous.providedBy(credentials):
-            return ''
+        if IToken.providedBy(credentials):
+            token = credentials.value
 
-        elif IToken.providedBy(credentials):
-            return credentials.value
+            return (self.getUserByToken(token)
+                .addCallback(self._gotUser, token)
+                .addCallback(lambda user: user.user_id)
+            )
 
+        else:
+            raise NotImplementedError()
+
+    def _gotUser(self, user, token):
+        if not user:
+            return self.createUser(token)
+        else:
+            return user[0]
+
+    def createUser(self, token):
+        query = (users
+            .insert()
+            .values(token=token, name=token)
+            .returning(users.c.user_id)
+            .compile(dialect=dialect())
+        )
+        self.log.debug('createUser {token}', token=token)
+        return self._pool.runQuery(str(query), query.params)
 
 
 class MainResource(Resource):
@@ -183,12 +219,14 @@ class MainResource(Resource):
 
     def _setToken(self, request):
         token = uuid.uuid4().hex
-        request.addCookie('token', 'chuj')
+        request.addCookie('token', token)
 
     def getChild(self, path, request):
         token = request.getCookie('token')
+
         if token is None:
             self._setToken(request)
+
         if path == 'api':
             return APIResource()
         elif path == 'ws':
@@ -203,7 +241,7 @@ class MainResource(Resource):
 
 
 if __name__ == '__main__':
-    pool = txpostgres.ConnectionPool(None, dbname='asdf')
+    pool = txpostgres.ConnectionPool(None, dbname='asdf', cursor_factory=NamedTupleCursor)
     pool.start()
     chatroom = Chatroom(pool)
     realm = ChatRealm(chatroom)
@@ -211,7 +249,9 @@ if __name__ == '__main__':
     checker = TokenChecker(pool)
     portal.registerChecker(checker)
     ws = WSResourceWrapper(portal)
-    log.startLogging(sys.stdout)
     site = Site(MainResource(ws))
     reactor.listenTCP(8000, site)
+
+    globalLogPublisher.addObserver(textFileLogObserver(sys.stdout))
+
     reactor.run()
