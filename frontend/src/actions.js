@@ -14,6 +14,8 @@ const nameChange = createAction('NAME_CHANGE');
 const nameChangeSuccess = createAction('NAME_CHANGE_SUCCESS');
 const nameChangeFailed = createAction('NAME_CHANGE_FAILED');
 
+const chatLinesReceived = createAction('CHAT_LINES_RECEIVED');
+
 export const connectWS = () => (dispatch, getState) => {
     let {connected} = getState();
 
@@ -49,6 +51,9 @@ export const messageReceived = data => (dispatch, getState) => {
             dispatch(userReceived(data.payload));
             break;
 
+        case "chatLines":
+            dispatch(chatLinesReceived(data.payload));
+            break;
     }
 
 }

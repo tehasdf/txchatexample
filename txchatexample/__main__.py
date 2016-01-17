@@ -5,6 +5,8 @@ import uuid
 
 from zope.interface import Interface, implementer
 
+from twisted.cred.credentials import Anonymous, IAnonymous
+from twisted.cred.checkers import ICredentialsChecker
 from twisted.internet import reactor
 from twisted.logger import Logger, textFileLogObserver, globalLogPublisher
 from twisted.web.server import Site
@@ -12,9 +14,8 @@ from twisted.web.static import File
 from twisted.web.proxy import ReverseProxyResource
 from twisted.web.resource import Resource
 from twisted.cred.portal import Portal
-from twisted.internet.defer import inlineCallbacks
+from twisted.internet.defer import inlineCallbacks, gatherResults, returnValue
 from twisted.web.util import DeferredResource
-
 
 from autobahn.twisted.resource import WebSocketResource
 from autobahn.twisted.websocket import WebSocketServerFactory, WebSocketServerProtocol
@@ -22,7 +23,7 @@ from autobahn.twisted.websocket import WebSocketServerFactory, WebSocketServerPr
 from txpostgres import txpostgres
 
 from sqlalchemy import Table, Column, Integer, String, MetaData, ForeignKey, Sequence
-from sqlalchemy.dialects.postgresql import dialect
+from sqlalchemy.dialects.postgresql import dialect, TIMESTAMP
 from sqlalchemy import select
 
 from psycopg2.extras import NamedTupleCursor
@@ -40,6 +41,7 @@ users = Table('chat_users', md,
 logs = Table('chat_logs', md,
     Column('log_id', Integer(), Sequence('chat_logs_id_seq'), primary_key=True),
     Column('user_id', Integer(), ForeignKey('chat_users')),
+    Column('when', TIMESTAMP()),
     Column('text', String())
 )
 
@@ -61,9 +63,18 @@ class EchoServerProtocol(WebSocketServerProtocol):
         super(EchoServerProtocol, self).__init__()
 
     def onOpen(self):
+        (self._talker.getUserDetails()
+            .addCallback(self.sendAction, action='userDetails')
+        )
+
+        (self._chatroom.getLastLog()
+            .addCallback(self.sendAction, action='chatLines')
+        )
+
+    def sendAction(self, payload=None, action=None):
         self.sendMessage(json.dumps({
-            'action': 'userDetails',
-            'payload': self._talker.getUserDetails()
+            'action': action,
+            'payload': payload
         }))
 
     def onMessage(self, payload, isBinary):
@@ -138,12 +149,15 @@ class Talker(object):
         )
         user = (yield self._pool.runQuery(str(query), query.params))[0]
         self._user = user
+        returnValue(self._user)
 
     def logout(self):
         pass
 
     def getUserDetails(self):
-        return self._user._asdict()
+        return (self._refreshUser()
+            .addCallback(lambda user: user._asdict())
+        )
 
 
 class ChatRealm(object):
@@ -198,11 +212,15 @@ class Chatroom(object):
         self._names.add(from_name)
         self._names.remove(to_name)
 
-
-
-from twisted.cred.credentials import Anonymous, IAnonymous
-from twisted.cred.checkers import ICredentialsChecker
-
+    def getLastLog(self):
+        query = (select([logs])
+            .order_by(logs.c.when.desc())
+            .limit(30)
+            .compile(dialect=dialect())
+        )
+        return (self._pool.runQuery(str(query), query.params)
+            .addCallback(lambda lines: [line._asdict() for line in lines])
+        )
 
 class IToken(Interface):
     pass
