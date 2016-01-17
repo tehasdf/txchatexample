@@ -19,14 +19,14 @@ from sqlalchemy import Table, Column, Integer, String, MetaData, ForeignKey
 
 md = MetaData()
 users = Table('chat_users', md,
-    Column('id', Integer(), primary_key=True),
-    Column('token', String(), unique=True),
-    Column('name', String(), unique=True)
+    Column('user_id', Integer(), primary_key=True),
+    Column('token', String(32), unique=True),
+    Column('name', String(200), unique=True)
 )
 
 
 logs = Table('chat_logs', md,
-    Column('id', Integer(), primary_key=True),
+    Column('log_id', Integer(), primary_key=True),
     Column('user_id', Integer(), ForeignKey('chat_users')),
     Column('text', String())
 )
