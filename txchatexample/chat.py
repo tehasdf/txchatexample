@@ -1,4 +1,4 @@
-from zope.interface import Interface, implementer
+from zope.interface import Interface, implementer, Attribute
 
 from twisted.logger import Logger
 from twisted.internet.defer import inlineCallbacks, returnValue
@@ -13,13 +13,30 @@ from psycopg2 import IntegrityError
 from txchatexample.db import logs, users
 from txchatexample.util import Registry
 
+
 class ITalker(Interface):
     """
     """
+    user_id = Attribute('user_id')
+
+    def logout():
+        pass
+
+    def getUserDetails():
+        """Get some user info from the database"""
+
+    def setName(name):
+        """Call this to trigger a name change in the db"""
 
 
 @implementer(ITalker)
 class Talker(object):
+    """An object representing a single chatroom user.
+
+    This is the application-layer "avatar", that is used from the
+    communication-layer protocol.
+    While a protocol represents a connection, the avatar represents a user.
+    """
     def __init__(self, pool, user):
         self._pool = pool
         self._user = user

@@ -1,3 +1,9 @@
+"""twisted.web http interface for the chat application
+
+MainResource.getChild is the main router, with proxying to the frontend
+devserver, and to the websockets resource.
+"""
+
 import os.path
 import uuid
 

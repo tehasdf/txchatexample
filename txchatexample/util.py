@@ -30,6 +30,12 @@ def getQueryWithParams(dialect, query, params):
 
 
 class ConnectionPool(txpostgres.ConnectionPool):
+    """A txpostgres ConnectionPool that renders sqlalchemy queries
+
+    This is so you can pass a sqlalchemy Query object to .runQuery
+    and .runOperation. It will render it using the postgresql sqlalchemy
+    dialect.
+    """
     def __init__(self, **kwargs):
         kwargs.setdefault('cursor_factory', NamedTupleCursor)
         self._sqla_dialect = dialect()
@@ -46,6 +52,8 @@ class ConnectionPool(txpostgres.ConnectionPool):
 
 
 class Registry(object):
+    """Util to register callbacks and call them all with a single operation
+    """
     def __init__(self):
         self._registered = set()
 
@@ -61,6 +69,8 @@ class Registry(object):
 
 
 class DBListener(Registry):
+    """Callbacking listener for use with postgresql's listen/notify
+    """
     def __init__(self, connection, channel='chat_line_notification'):
         super(DBListener, self).__init__()
         self._connection = connection

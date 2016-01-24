@@ -1,3 +1,17 @@
+"""This implements twisted.cred for the chat application.
+
+The Portal gets credentials from the application (eg. from a cookie; here: token)
+and passes it to the checkers; checkers validate the credentials, and if
+the credentials are correct, a avatar id (user id) is returned. The avatar id
+is then passed to the Realm, which returns an avatar (a "user object";
+here: ITalker).
+
+The TokenChecker does a simple database lookup to get the user id, based on the
+token.
+
+For usage, see txchatexample/web.py, WSResourceWrapper.getResource
+"""
+
 from zope.interface import Interface, implementer
 
 from twisted.cred.checkers import ICredentialsChecker
@@ -63,6 +77,7 @@ class TokenChecker(object):
         )
         self.log.debug('createUser {token}', token=token)
         return self._pool.runQuery(query)
+
 
 class ChatRealm(object):
     log = Logger()

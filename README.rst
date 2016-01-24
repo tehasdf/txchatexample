@@ -15,6 +15,15 @@ Frontend is realized as a react-redux app.
 
 Connectivity is websockets with autobahn.
 
+Some patterns shown by this code:
+
+* sqlalchemy core usage
+* registry+callbacks
+* txpostgres listen/notify
+* the new twisted.log logger
+* twisted.cred usage (with twisted.web)
+
+
 Running the code
 ----------------
 
@@ -38,3 +47,4 @@ TODO
 ----
 
 * add more tests
+* migrate with alembic

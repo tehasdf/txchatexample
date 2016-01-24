@@ -1,3 +1,11 @@
+"""Db connectivity in this application is done using sqlalchemy core + txpostgres
+
+Parts of the application use these tables to create sqlalchemy core queries,
+which are then handed off to the connectionpool (txchatexamples.util.ConnectionPool)
+to be rendered.
+
+"""
+
 from sqlalchemy import Table, Column, Integer, String, MetaData, ForeignKey, Sequence
 from sqlalchemy.dialects.postgresql import TIMESTAMP
 
