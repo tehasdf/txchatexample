@@ -16,11 +16,20 @@ const nameChangeFailed = createAction('NAME_CHANGE_FAILED');
 
 const chatLinesReceived = createAction('CHAT_LINES_RECEIVED');
 
+
+const _getWSLink = () => {
+    return [
+        (location.protocol === 'https:') ? 'wss://' : 'ws://',
+        location.host,
+        '/ws'
+    ].join('');
+}
+
 export const connectWS = () => (dispatch, getState) => {
     let {connected} = getState();
 
     dispatch(startConnecting());
-    let ws = new WSConnection('ws://127.0.0.1:8000/ws', {
+    let ws = new WSConnection(_getWSLink(), {
         onmessage: data => dispatch(messageReceived(data)),
         onclose: () => dispatch(wsDisconnected())
     });
