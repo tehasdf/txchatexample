@@ -24,6 +24,13 @@ Some patterns shown by this code:
 * twisted.cred usage (with twisted.web)
 
 
+Live demo
+----------
+
+https://trewq.pl/chat
+
+
+
 Running the code
 ----------------
 
