@@ -21,6 +21,7 @@ const _getWSLink = () => {
     return [
         (location.protocol === 'https:') ? 'wss://' : 'ws://',
         location.host,
+        location.pathname.replace(/\/$/, ''),
         '/ws'
     ].join('');
 }
