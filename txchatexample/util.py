@@ -61,7 +61,7 @@ class Registry(object):
         self._registered.add(other)
 
     def unregister(self, other):
-        self._registered.add(other)
+        self._registered.remove(other)
 
     def broadcast(self, func, *args, **kwargs):
         return [func(elem, *args, **kwargs) for elem in self._registered]
